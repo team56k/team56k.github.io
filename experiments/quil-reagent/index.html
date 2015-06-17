@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html>
+  <head>
+  	<link rel="stylesheet" type="text/css" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/8.6/styles/zenburn.min.css">
+  </head>
+  <body>
+  	<style>
+  		body {
+  			font-family: monospace;
+  			font-size: 16px;
+  			margin: 40px;
+  		}
+
+  		.hljs {
+  			padding-top: 20px;
+  			padding-bottom: 20px;
+  		}
+
+  		h3 {
+  			margin-top: 40px;
+  			margin-bottom: 20px;
+  		}
+  	</style>
+  	<h1>Experiment: quil-reagent</h1>
+  	<h3>Explanation</h3>
+  	<div id="explanation">
+  		<p>I wanted to see if I could control a Quil sketch using Reagent controls. Turns out, it's pretty easy. Original Quil sketch is from <a href="http://quil.info/sketches/show/zCsatwta2K">here</a>. FWIW - what I think this shows is that it's pretty easy to alter Quil/Processing in real time. Anything could be altering those atoms - it just happens to be those Reagent controls. But it could easily be other functions/core.async channels/whatever.</p>
+
+  		<p>Currently, the left slider controls the amplitude, and right controls the vertical offset. My next evolution of this will be allowing the user to choose to cycle between a variety of "signal generators" for those inputs - either a slider, an arbitrary function (ie a sine wave), or something over the network.</p>
+  	</div>
+  	<h3>Demo</h3>
+    <canvas id="hello-quil-cljs"></canvas>
+    <div id="controls"></div>
+
+    <h3>Source</h3>
+    <pre id="source">
+    	(ns ^:figwheel-always investigation.core
+    	  (:require [quil.core :as q :include-macros true]
+    	            [quil.middleware :as m]
+    	            [reagent.core :as reagent :refer [atom]]))
+
+    	(def amp-co (atom 8))
+    	(def vert-co (atom 5))
+
+    	(defn setup []
+    	  (q/frame-rate 30))
+
+    	(defn t []
+    	  (* 0.001 (q/millis)))
+
+    	(defn calc-y [x mid amp]
+    	  (+ mid (* (q/sin (+ (t) x)) amp)))
+
+    	(defn wave [step mid-y amp]
+    	  (let [w (q/width)
+    	        h (q/height)
+    	        mult (q/map-range w
+    	                          700 200
+    	                          0.01 0.03)]
+    	    (q/begin-shape)
+    	    (q/vertex 0 h) ; lower left corner
+    	    (doseq [x (range (- w) (+ step w) step)]
+    	      (let [t (* x mult)
+    	            y (calc-y t mid-y amp)]
+    	        (q/vertex x y)))
+    	    (q/vertex w h) ; lower right corner
+    	    (q/end-shape)))
+
+    	(defn draw []
+    	  (q/background 250)
+    	  (q/stroke 255 250)
+    	  (q/fill 50 230 (+ (* 20 (q/sin (t))) 230) 40)
+
+    	  (let [h (q/height)
+    	        move-down (/ h @vert-co)
+    	        amp (/ h @amp-co)]
+    	    (doseq [y (range move-down (+ amp h) 8)]
+    	      (let [x-step (- (* y 0.8) move-down)]
+    	        (wave x-step y amp)))))
+
+    	(q/defsketch hello-quil-cljs
+    	             :host "hello-quil-cljs"
+    	             :size [500 500]
+    	             :setup setup
+    	             :draw draw)
+
+
+    	(defn value-slider [value-atom min max]
+    	  [:input {:type "range"
+    	           :default-value @value-atom
+    	           :min min :max max
+    	           :on-change (fn [e]
+    	                        (let [value (.-value (.-target e))]
+    	                          (reset! value-atom value)))}])
+
+    	(defn controls []
+    	  [:div
+    	   [value-slider amp-co 1 100]
+    	   [value-slider vert-co 3 100]])
+
+    	(reagent/render-component [controls] (. js/document (getElementById "controls")))
+
+    </pre>
+    <script src="investigation.js" type="text/javascript"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/8.6/highlight.min.js" type="text/javascript"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/8.6/languages/clojure.min.js" type="text/javascript"></script>
+    <script>
+    	hljs.highlightBlock(document.getElementById("source"));
+    </script>
+  </body>
+</html>
