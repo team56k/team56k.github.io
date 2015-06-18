@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html>
+  <head>
+  	<link rel="stylesheet" type="text/css" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/8.6/styles/zenburn.min.css">
+  </head>
+  <body>
+  	<style>
+  		body {
+  			font-family: monospace;
+  			font-size: 16px;
+  			margin: 40px;
+  		}
+
+  		.hljs {
+  			padding-top: 20px;
+  			padding-bottom: 20px;
+  		}
+
+  		h3 {
+  			margin-top: 40px;
+  			margin-bottom: 20px;
+  		}
+  	</style>
+  	<h1>Experiment: signal-source</h1>
+  	<h3>Explanation</h3>
+  	<div id="explanation">
+  		<p>Building on the previous experiment, I then wanted to see if I could use an arbitrary function to control some parameter in a sketch, and toggle between an explicit control and an automated input while the sketch was running. It's not terribly impressive, but I'm building up to something cool, dammit! One step at a time and all that. Original sketch from <a href="http://quil.info/sketches/show/example_tailspin">here</a>.</p>
+  	</div>
+  	<h3>Demo</h3>
+    <canvas id="hello-quil-cljs"></canvas>
+    <div id="controls"></div>
+
+    <h3>Source</h3>
+    <pre id="source">
+      (ns ^:figwheel-always investigation.core
+        (:require [quil.core :as q :include-macros true]
+                  [quil.middleware :as m]
+                  [reagent.core :as reagent :refer [atom]]))
+
+      (defonce speed (atom 15))
+      (defonce speed-signal-source (atom "slider"))
+
+      (def speed-range 30)
+
+      (defn setup []
+        (q/frame-rate 30)
+        (let [max-r (/ (q/width) 2)
+              n (int (q/map-range (q/width)
+                                  200 500
+                                  20 50))]
+          {:dots (into [] (for [r (map #(* max-r %)
+                                       (range 0 1 (/ n)))]
+                            [r 0]))}))
+
+      ;;FIXME: this sux
+      (defn t []
+        (* 0.001 (q/millis)))
+
+      (defn get-offset []
+        (condp = @speed-signal-source
+          "slider" (* 0.0001 (- @speed (/ speed-range 2)))
+          "sine-wave-generator" (* 0.001 (q/sin (t)))))
+
+      (defn move [dot]
+        (let [[r a] dot]
+          [r (+ a (* r (get-offset)))]))
+
+      (defn update-state [state]
+        (update-in state [:dots] #(map move %)))
+
+      (defn dot->coord [[r a]]
+        [(+ (/ (q/width) 2) (* r (q/cos a)))
+         (+ (/ (q/height) 2) (* r (q/sin a)))])
+
+      (defn draw-state [state]
+        (q/background 255)
+        (q/fill 0)
+        (let [dots (:dots state)]
+          (loop [curr (first dots)
+                 tail (rest dots)
+                 prev nil]
+            (let [[x y] (dot->coord curr)]
+              (q/ellipse x y 5 5)
+              (when prev
+                (let [[x2 y2] (dot->coord prev)]
+                  (q/line x y x2 y2))))
+            (when (seq tail)
+              (recur (first tail)
+                     (rest tail)
+                     curr)))))
+
+      (q/defsketch tailspin
+                   :host "hello-quil-cljs"
+                   :size [500 500]
+                   :setup setup
+                   :update update-state
+                   :draw draw-state
+                   :middleware [m/fun-mode])
+
+
+      (defn get-value [e]
+        (.-value (.-target e)))
+
+      (defn value-slider [value-atom min max]
+        [:input {:type "range"
+                 :default-value @value-atom
+                 :min min :max max
+                 :on-change (fn [e]
+                              (let [value (get-value e)]
+                                (reset! value-atom value)))}])
+
+      (defn controls []
+        [:div
+         [:select {:default-value @speed-signal-source :on-change #(reset! speed-signal-source (get-value %))}
+          (map #(vec [:option {:value % :key %} (name %)]) ["slider" "sine-wave-generator"])
+          ]
+         [:label "Speed:"] [value-slider speed 1 speed-range]])
+
+      (reagent/render-component [controls] (. js/document (getElementById "controls")))
+
+    </pre>
+    <script src="investigation.js" type="text/javascript"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/8.6/highlight.min.js" type="text/javascript"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/8.6/languages/clojure.min.js" type="text/javascript"></script>
+    <script>
+    	hljs.highlightBlock(document.getElementById("source"));
+    </script>
+  </body>
+</html>
