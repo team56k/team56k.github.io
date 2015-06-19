@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html>
+  <head>
+  	<link rel="stylesheet" type="text/css" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/8.6/styles/zenburn.min.css">
+  </head>
+  <body>
+  	<style>
+  		body {
+  			font-family: monospace;
+  			font-size: 16px;
+  			margin: 40px;
+  		}
+
+  		.hljs {
+  			padding-top: 20px;
+  			padding-bottom: 20px;
+  		}
+
+  		h3 {
+  			margin-top: 40px;
+  			margin-bottom: 20px;
+  		}
+  	</style>
+  	<h1>Experiment: sketch-swap</h1>
+  	<h3>Explanation</h3>
+  	<div id="explanation">
+      <p>
+        My goal in this experiment was to see if I could switch the sketch on the fly. Again - not very exciting, but the direction I'm heading in is trying to move away from Processing code that's written ahead of time to objects that can be swapped in and out. The "let's mutate a bunch of global variables" approach that Processing takes makes this more challenging (it leads to some weird glitchiness if you switch sketches at the wrong time).
+      </p>
+      <p>
+        To dig into that a bit more, if the goal is to build a set of transformations that are composable at runtime, the current form of the sketches kind of sucks. Currently, the sketches consist of 3 parts:
+        <ol>
+          <li>
+            The :setup function, which usually performs some global modifications to the Processing context (boo!) and then yields the initial state for the sketch (yay!). So we can think of it as a function with the signature () -> (IO State).
+          </li>
+          <li>
+            The :update function, which is the best of the bunch. It's just a function with the signature State -> State. A pure transformation! Well, we can't <em>guarantee</em> that it's pure, but what can you do?
+          </li>
+          <li>
+            The :draw function, which fucking sucks. Its signature is State -> IO.
+          </li>
+        </ol>
+      </p>
+      <p>
+        I want to move towards representing all of the elements in the system as pure functions of the type (Optional State) -> State. In this conception, what is now one unified "sketch object" would be broken into three similar parts. :setup would become a function of the type Nothing -> State, :update would become a function of the type (Just State) -> State, and :draw would become the same. Then, all we have to do is write a function that translates the final State (which ideally contains a data structure representing what should actually be drawn on the screen) into a reified picture.
+      </p>
+      <p>
+        This conception presents two challenges: 1) we need a way of representing drawing instructions as a data structure (as opposed to the "immediate mode" function calls that they are today), and 2) we need a way to make sure that the State getting passed through our pipeline of functions has the right shape to satisfy all of the functions it's getting passed to. These will be the challenges I address in my next experiment.
+      </p>
+  	</div>
+  	<h3>Demo</h3>
+    <canvas id="hello-quil-cljs"></canvas>
+    <div id="controls"></div>
+
+    <h3>Source</h3>
+    <pre id="source">
+      (ns ^:figwheel-always investigation.core
+        (:require [quil.core :as q :include-macros true]
+                  [quil.middleware :as m]
+                  [keybind :as key]
+                  [reagent.core :as reagent :refer [atom]]))
+
+      ;; -- helper functions
+
+      (defn dot->coord [[r a]]
+        [(+ (/ (q/width) 2) (* r (q/cos a)))
+         (+ (/ (q/height) 2) (* r (q/sin a)))])
+
+      (defn move [dot]
+        (let [[r a] dot]
+          [r (+ a (* r (* 0.0001 (- 10 (/ 30 2)))))]))
+
+      (defn tick [state]
+        (update-in state [:r] + 5.0))
+
+      (defn flip [state]
+        {:r 0.0
+         :col (if (= 0 (:col state)) 255 0)})
+
+      ;; -- sketches
+
+      (def tailspin
+        {
+         :name "tailspin"
+         :setup (fn []
+                  (let [max-r (/ (q/width) 2)
+                        n (int (q/map-range (q/width)
+                                            200 500
+                                            20 50))]
+                    {:dots (into [] (for [r (map #(* max-r %)
+                                                 (range 0 1 (/ n)))]
+                                      [r 0]))}))
+         :update (fn [state]
+                   (update-in state [:dots] #(map move %)))
+
+         :draw (fn [state]
+                 (q/background 255)
+                 (q/fill 0)
+                 (let [dots (:dots state)]
+                   (loop [curr (first dots)
+                          tail (rest dots)
+                          prev nil]
+                     (let [[x y] (dot->coord curr)]
+                       (q/ellipse x y 5 5)
+                       (when prev
+                         (let [[x2 y2] (dot->coord prev)]
+                           (q/line x y x2 y2))))
+                     (when (seq tail)
+                       (recur (first tail)
+                              (rest tail)
+                              curr)))))})
+
+      (def hyper
+        {
+         :name "hyper"
+         :setup (fn []
+                  {:r 0.0
+                   :col 0})
+
+
+         :update (fn [state]
+                   (if (< (:r state) 300)
+                     (tick state)
+                     (flip state)))
+
+         :draw (fn [state]
+                 (q/stroke (:col state))
+                 (let [hw (* 0.5 (q/width))
+                       hh (* 0.5 (q/height))]
+                   (dotimes [_ (quot (q/width) 10)]
+                     (let [rand-ang (q/random 0 q/TWO-PI)
+                           r (:r state)]
+                       (q/line hh
+                               hw
+                               (+ hh (* (q/sin rand-ang) r))
+                               (+ hw (* (q/cos rand-ang) r)))))))
+         })
+
+      ;; -- plumbing
+
+      (def active-sketch (atom tailspin))
+
+      (defn active-sketch-name [] (:name @active-sketch))
+
+      (defn setup []
+        (q/frame-rate 30)
+        {(active-sketch-name) ((:setup @active-sketch))})
+
+      (defn update-state [state]
+        (let [update-fn (:update @active-sketch)
+              sketch-name (active-sketch-name)
+              relevant-state (get state sketch-name)]
+          (assoc state sketch-name (update-fn relevant-state))))
+
+      (defn draw-state [state]
+        (let [draw-fn (:draw @active-sketch)
+              relevant-state (get state (active-sketch-name))]
+          (draw-fn relevant-state)))
+
+      (q/defsketch switcheroo
+                   :host "hello-quil-cljs"
+                   :size [500 500]
+                   :setup setup
+                   :update update-state
+                   :draw draw-state
+                   :middleware [m/fun-mode])
+
+      (defn swap-sketch! []
+        (let [new-sketch (condp = @active-sketch
+                           tailspin hyper
+                           hyper tailspin)]
+          (reset! active-sketch new-sketch)))
+
+      (key/bind! "ctrl-s" ::swap-sketch swap-sketch!)
+
+      (defn controls []
+        [:div
+         [:h3 "Hit ctrl-s to swap the sketch"]
+         [:div "Current sketch:" (active-sketch-name)]])
+
+      (reagent/render-component [controls] (. js/document (getElementById "controls")))
+
+
+
+    </pre>
+    <script src="investigation.js" type="text/javascript"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/8.6/highlight.min.js" type="text/javascript"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/8.6/languages/clojure.min.js" type="text/javascript"></script>
+    <script>
+    	hljs.highlightBlock(document.getElementById("source"));
+    </script>
+  </body>
+</html>
