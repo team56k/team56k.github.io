@@ -4,8 +4,5 @@ title: About
 permalink: /about/
 ---
 
-One of us has three testicles and inverted nipples. Two have blue eyes, but only one of which has Restless Leg Syndrome (RLS). If all of us were born before this date in 1994, and exactly half were born left-handed, why is there so much suffering in the world?
+"Imagine an eye unruled by man-made laws of perspective, an eye unprejudiced by compositional logic, an eye which does not respond to the name of everything but which must know each object encountered in life through an adventure of perception. How many colors are there in a field of grass to the crawling baby unaware of 'Green'? How many rainbows can light create for the untutored eye? How aware of variations in heat waves can that eye be? Imagine a world alive with incomprehensible objects and shimmering with an endless variety of movement and innumerable gradations of color. Imagine a world before the 'beginning was the word.'"
 
-
-
-...and VR stuff.
