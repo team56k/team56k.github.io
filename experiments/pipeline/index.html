@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html>
+  <head>
+  	<link rel="stylesheet" type="text/css" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/8.6/styles/zenburn.min.css">
+  </head>
+  <body>
+  	<style>
+  		body {
+  			font-family: monospace;
+  			font-size: 16px;
+  			margin: 40px;
+  		}
+
+  		.hljs {
+  			padding-top: 20px;
+  			padding-bottom: 20px;
+  		}
+
+  		h3 {
+  			margin-top: 40px;
+  			margin-bottom: 20px;
+  		}
+  	</style>
+  	<h1>Experiment: pipeline</h1>
+  	<h3>Explanation</h3>
+  	<div id="explanation">
+      <p>
+        I'm too tired right now for a full explanation. However - some scattered thoughts:
+        <ul>
+          <li>All of the functions in "user space" (ie the functions I would expect a user to manipulate, ie, tick-flip-1, tick-flip-2, draw-lines-1, draw-lines-2) are now pure functions of the same type (State -> State)
+          </li>
+          <li>
+            Because this is the case, I made something called the pipeline, which is basically a list of functions that can be composed together (see the run-pipeline function). The pipeline is a sequence of functions through which the state gets passed on every tick.
+          </li>
+          <li>
+            In order to make all of the functions pure, the last function in the pipeline emits a data structure that represents the drawing actions that will take place (that's the thing that gets put into :shapes). It might seem like a useless abstraction at this point to replace the imperative calls to the Processing functions with a data structure that represents the same, but I have a hunch that this is a good thing.
+          </li>
+          <li>
+            There is no more idea of a "sketch object" as there was in the last experiment - we're just dealing with functions that can compose with one another.
+          </li>
+          <li>
+            Oh yeah - <strong>click on the pipeline elements to swap them out on the fly</strong>. Right now the different elements do very similar things, but the change is perceptible, if not dramatic.
+          <li>
+          </ul>
+        </p>
+        <p>
+          Two things are on my radar for my next experiment:
+          <ol>
+            <li>
+              I'm passing around that opaque state object from pipeline function to pipeline function. However, especially if I'm going to be composing functions on the fly, I want assurance that pipeline function 1 is going to "hook up" correctly to pipeline function 2 that follows it. Get ready for some types/schemas!
+            </li>
+            <li>
+              I want to start weaving back in some elements of my earlier experiments, ie dynamic controls. My goal is that, if I choose to include function N in the pipeline, I can know which controllable bits function N exposes, and hook those controllable bits up to sliders/signal functions/whatever.
+            </li>
+          </ol>
+        </p>
+  	</div>
+  	<h3>Demo</h3>
+    <canvas id="hello-quil-cljs"></canvas>
+    <div id="controls"></div>
+
+    <h3>Source</h3>
+    <pre id="source">
+      (ns ^:figwheel-always investigation.core
+        (:require [quil.core :as q :include-macros true]
+                  [quil.middleware :as m]
+                  [reagent.core :as reagent :refer [atom]]))
+
+      (def tick-flip-1
+        ^{:visible-name "tick-flip-1"}
+        (fn [state]
+          (if (< (:r state) 300)
+            (update-in state [:r] + 5.0)
+            {:r 0.0
+             :col (if (= 0 (:col state)) 255 0)})))
+
+
+      (def tick-flip-2
+        ^{:visible-name "tick-flip-2"}
+        (fn [state]
+          (if (< (:r state) 100)
+            (update-in state [:r] + 5.0)
+            {:r 0.0
+             :col (if (= 0 (:col state)) 100 0)})))
+
+      (def draw-lines-1
+        ^{:visible-name "draw-lines-1"}
+        (fn [state]
+          (let [hw (* 0.4 (q/width))
+                hh (* 0.4 (q/height))
+                num-lines (quot (q/width) 10)
+                make-line (fn []
+                            (let [rand-ang (q/random 0 q/TWO-PI)
+                                  r (:r state)
+                                  x2 (+ hh (* (q/sin rand-ang) r))
+                                  y2 (+ hw (* (q/cos rand-ang) r))]
+                              [:line
+                               {:x1 hh :y1 hw :x2 x2 :y2 y2}
+                               {:stroke (:col state)}]))]
+
+          (assoc state :shapes (map make-line (range num-lines))))))
+
+      (def draw-lines-2
+        ^{:visible-name "draw-lines-2"}
+        (fn [state]
+          (let [hw (* 0.6 (q/width))
+                hh (* 0.6 (q/height))
+                num-lines (quot (q/width) 100)
+                make-line (fn []
+                            (let [rand-ang (q/random 0 q/TWO-PI)
+                                  r (:r state)
+                                  x2 (+ hh (* (q/sin rand-ang) r))
+                                  y2 (+ hw (* (q/cos rand-ang) r))]
+                              [:line
+                               {:x1 hh :y1 hw :x2 x2 :y2 y2}
+                               {:stroke (:col state)}]))]
+
+            (assoc state :shapes (map make-line (range num-lines))))))
+
+      (def pipeline-options [[tick-flip-1 tick-flip-2] [draw-lines-1 draw-lines-2]])
+      (def pipeline (atom [tick-flip-1 draw-lines-1]))
+
+      ;; -- plumbing
+
+      (defmulti draw-shape! first)
+      (defmethod draw-shape! :line [[_ params pen]]
+        (do
+          (q/stroke (:stroke pen))
+          (q/line (:x1 params)
+                  (:y1 params)
+                  (:x2 params)
+                  (:y2 params))))
+
+      (defn run-pipeline [state]
+        ((apply comp @pipeline) state))
+
+      (defn setup []
+        (q/frame-rate 30)
+        (run-pipeline {}))
+
+      (defn draw-state [state]
+        (let [shapes (:shapes state)]
+          (doseq [shape shapes] (draw-shape! shape))))
+
+      (q/defsketch switcheroo
+                   :host "hello-quil-cljs"
+                   :size [500 500]
+                   :setup setup
+                   :update run-pipeline
+                   :draw draw-state
+                   :middleware [m/fun-mode])
+
+      (defn fn-name [f]
+        (-> f meta :visible-name))
+
+      (defn pipeline-stage [idx stage]
+        (let [active-fn (nth @pipeline idx)]
+          ^{:key idx} [:li
+                       {:on-click (fn [_]
+                                    (let [other-fn (first (remove #(= % active-fn) stage))
+                                          swapped-pipeline (assoc @pipeline idx other-fn)]
+                                      (reset! pipeline swapped-pipeline)))}
+                       (fn-name active-fn)]))
+
+      (defn controls []
+        [:div
+         [:h1 "Pipeline:"]
+         [:ul
+          (doall (map-indexed pipeline-stage pipeline-options))]])
+
+      (reagent/render-component [controls] (. js/document (getElementById "controls")))
+
+    </pre>
+    <script src="investigation.js" type="text/javascript"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/8.6/highlight.min.js" type="text/javascript"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/8.6/languages/clojure.min.js" type="text/javascript"></script>
+    <script>
+    	hljs.highlightBlock(document.getElementById("source"));
+    </script>
+  </body>
+</html>
